@@ -9,11 +9,12 @@
 #include <errno.h>
 #include <arpa/inet.h> // C - Implicit Declaration of Function 'inet_addr'
 
-#define MAX 80 
+#define MAX 800000 
 #define PORT 8080 
 #define SA struct sockaddr 
+#define BUFSIZ 128
 
-//gcc KM.c -l crypto -o client2
+//gcc -g KM.c -l crypto -o client2
 
 
 void handleErrors(void)
@@ -24,11 +25,13 @@ void handleErrors(void)
 
 void func(int sockfd) 
 { 
-    char buff[MAX]; 
+    char buff[BUFSIZ]; 
     int n; 
     int trimiteCheia = 0;
     unsigned char mod;
     unsigned char k[16]; // Cheie generata random
+    int trimite = 0;
+
 
 	/* A 256 bit key */
     unsigned char *key = (unsigned char *)"01234567890123456789012345678901";
@@ -82,13 +85,22 @@ void func(int sockfd)
                     EVP_CIPHER_CTX_free(ctx);
                     //------------------------
 
+                    bzero(buff, sizeof(buff)); 
                     printf("Cheia criptata este: %s\n", ciphertext);
+                    strcpy(buff,ciphertext);
+                    printf("Buffer: %s\n", buff);
+                    
                     //trimit cheia criptata
-                    if(write(sockfd, ciphertext, sizeof(ciphertext)<=0))
+                    if(trimiteCheia == 0)
                     {
-                        perror ("[server]Eroare la write() catre server. BADUMTZ\n");
-                    } 
-                    trimiteCheia = 1; 
+                        if(write(sockfd, buff, ciphertext_len) <=0 )
+                        {
+                            perror ("[server]Eroare la write() catre server. BADUMTZ\n");
+                        }
+                        else
+                            trimiteCheia = 1;   
+                    }
+                    printf("Cheia s-a trimis! \n");
                 }
                 
             else

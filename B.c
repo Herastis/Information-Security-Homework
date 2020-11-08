@@ -6,19 +6,28 @@
 #include <unistd.h>
 #include <errno.h>
 #include <arpa/inet.h> // C - Implicit Declaration of Function 'inet_addr'
+#include <openssl/evp.h>
 #define MAX 80 
 #define PORT 8080 
 #define SA struct sockaddr 
+#define BUFSIZ 128
 
+//gcc -g B.c -l crypto -o client
 
+void handleErrors(void)
+{
+    ERR_print_errors_fp(stderr);
+    abort();
+}
 
 void func(int sockfd) 
 { 
     int hi=0;
     int cbc=0, ofb=0;
-    char buff[MAX]; 
+    char buff[BUFSIZ]; 
     int n; 
     int primesteCheia = 0;
+    int msj_decriptat = 0;
     //----------------------------------------------------------------------
     /* A 256 bit key */
     unsigned char *key = (unsigned char *)"01234567890123456789012345678901";
@@ -28,18 +37,26 @@ void func(int sockfd)
     /* Buffer for the decrypted text */
     unsigned char decryptedtext[128];
 	//----------------------------------------------------------------------
-    
+    int x=0;
     for (;;) { 
         bzero(buff, sizeof(buff));
         if(hi==0) // Hi, I am B!
             { 
-                strcpy(buff,"Hi, I am B!"); //trimit Salut sunt B!
+                
                 bzero(buff, sizeof(buff)); 
-                write(sockfd, buff, sizeof(buff)); 
+                strcpy(buff,"Hi, I am B!"); //trimit Salut sunt B!
+                printf("Trimit spre A... \n");
+                if ( (x = send(sockfd, buff, BUFSIZ, 0)) <= 0) // trimite catre KM modul ales
+						{
+							perror ("[server]Eroare la write() Hi, I am B! spre A. \n");
+							//return errno;
+						}     
+                printf(buff, "%s\n");
                 hi=1;
             }
-        else if ((cbc || ofb) == 0) //primeste modul si ciphertextul
+        if ( ((cbc || ofb) == 0) && hi == 1) //primeste modul si ciphertextul
             {   
+                printf("B");
                 //1) Citesc modul de operare de la A
                 bzero(buff, sizeof(buff)); 
                 read(sockfd, buff, sizeof(buff)); 
@@ -57,33 +74,63 @@ void func(int sockfd)
                 //2) Citesc ciphertextul de la A
                 bzero(buff, sizeof(buff)); 
                 read(sockfd, buff, sizeof(buff)); 
-                printf("2)Cheia criptata primita de la KM : %s", buff);
+                printf("2)Cheia criptata primita de la A : %s", buff);
                 strcpy(ciphertext,buff);
             }
-            /*
-        else if(primesteCheia==0)   //3) primeste cheia de la A
+        if(cbc || ofb) //decriptam
+        {
+			EVP_CIPHER_CTX *ctx;
+			int len;
+			int plaintext_len;
+            int ciphertext_len;
+
+			unsigned char plaintext[16] ={0}; // Cheie ce urmeaza a fi decriptata
+
+			if(!(ctx = EVP_CIPHER_CTX_new()))
+				handleErrors();
+
+			if(cbc)
             {
-                bzero(buff, sizeof(buff)); 
-                if(read(sockfd, buff, sizeof(buff) <= 0))
-                {
-                    perror ("[server]Eroare la read() de la client. BADUMTZ\n");
-                    //return errno;
-                }
-                else 
-                {
-                    printf("3)Cheia primita de la A : %s", buff); 
-                    primesteCheia = 1;
-                    strcpy(ciphertext,buff);
-                    printf("Ciphertext: %s", ciphertext);
-                }
+				if(1 != EVP_DecryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, key, iv))
+					handleErrors();
             }
-			*/
+			else 
+            if(ofb)
+				if(1 != EVP_DecryptInit_ex(ctx, EVP_aes_256_ofb(), NULL, key, iv))
+					handleErrors();
+		
+			if(1 != EVP_DecryptUpdate(ctx, plaintext, &len, ciphertext, ciphertext_len))
+				handleErrors();
+			plaintext_len = len;
+
+		
+			if(1 != EVP_DecryptFinal_ex(ctx, plaintext + len, &len))
+				handleErrors();
+			plaintext_len += len;
+
+			/* Clean up */
+			EVP_CIPHER_CTX_free(ctx);
+
+            printf("Cheia decriptata este: %s\n", plaintext);
+
+            msj_decriptat = 1;
+        }
+        
+        if(msj_decriptat)
+        {
+            const char *msj_comunicare = "Buna seara!";
+            strcpy(buff, msj_comunicare);
+            if (write(sockfd, buff, BUFSIZ) <= 0) // trimite catre KM modul ales
+                    {
+                        perror ("[server]Eroare la write() Hi, I am B! spre A. \n");
+                        //return errno;
+                    }
+        }
         else
         {
             close(sockfd);
             exit(0);
-        }
-        
+        }   
     }
 } 
   
