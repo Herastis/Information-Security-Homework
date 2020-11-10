@@ -8,13 +8,15 @@
 #include <unistd.h>
 #include <errno.h>
 #include <openssl/evp.h>
+#include <pthread.h>
+
 #define MAX 800000 
 #define PORT 8080 
 #define SA struct sockaddr 
-#define BUFSIZ 128
+#include <openssl/aes.h>
 
 extern int errno;
-//gcc -g A.c -l crypto -o server
+//	gcc -g A.c -l crypto -o server
 
 void handleErrors(void)
 {
@@ -22,216 +24,243 @@ void handleErrors(void)
     abort();
 }
 
-// Function designed for chat between client and server. 
-void func(int sockfd) 
+
+int hiB = 0, hiKM = 0; //variabile care verifica comunicarea cu B si KM
+int cbc=0, ofb=0;
+int primesteCheia = 0; //verifica daca A a primit cheia de la KM
+int fisierCriptat = 0;
+//----------------------------------------------------------------------
+unsigned char *key = (unsigned char *)"0123456789012345"; // k'
+unsigned char *iv = (unsigned char *)"0123456789012345";  // Vector de initializare 
+unsigned char ciphertext[128];
+unsigned char decryptedtext[128];
+//----------------------------------------------------------------------
+char buff[BUFSIZ]; 
+char msg[BUFSIZ];
+
+void *func(int sockfd) 
 { 
-	int hiB = 0, hiKM = 0;
-	int cbc=0, ofb=0;
-	char mod[BUFSIZ]; //mod de operare
-	int primesteCheia = 0;
-	int raspunsB = 0;
-	//----------------------------------------------------------------------
-	 /* A 256 bit key */
-    unsigned char *key = (unsigned char *)"01234567890123456789012345678901";
-	 /* A 128 bit IV */
-    unsigned char *iv = (unsigned char *)"0123456789012345";
-	unsigned char ciphertext[128];
-	/* Buffer for the decrypted text */
-    unsigned char decryptedtext[128];
-	//----------------------------------------------------------------------
-	char buff[BUFSIZ]; 
-	int n; 
-	int x=0;
-	// infinite loop 
-	for (;;) {
-		//printf("\n[A> "); 
-		bzero(buff, BUFSIZ); 
-		// 1) A transmite modul de operare catre KM si primeste cheia
-		if(hiKM == 0 || primesteCheia == 0)
-		{
-			printf("Nu ");
-			bzero(buff, BUFSIZ); 
-			if(read(sockfd, buff, BUFSIZ) < 0)
-			{
-				perror ("[server]Eroare la read() Hi, I am KM! de la KM. \n");
-				//return errno;
-			}
-			if(strcmp("Hi, I am KM!", buff) == 0 && hiKM == 0)
-					{	
-						hiKM = 1;
-						printf("1)Trimite cbc sau ofb catre KM: ");
-						bzero(buff, BUFSIZ); 
-						fgets(buff, BUFSIZ, stdin);
-						if(strncmp(buff,"cbc",3) == 0)
-							cbc = 1;
-						else
-							ofb = 1;
+    // infinite loop 
+    for (;;) {
+        //printf("\n[A> "); 
+        bzero(buff, BUFSIZ); 
+        // 1) A transmite modul de operare catre KM si primeste cheia
+        if(hiKM == 0 || primesteCheia == 0)
+        {
+            bzero(buff, BUFSIZ); 
+            if(read(sockfd, buff, BUFSIZ) < 0)
+            {
+                perror ("[server]Eroare la read() Hi, I am KM! de la KM. \n");
+                //return errno;
+            }
+            if(strcmp("Hi, I am KM!", buff) == 0 && hiKM == 0)
+                    {	
+                        hiKM = 1;
+                        printf("1)Trimite cbc sau ofb catre KM: ");
+                        bzero(buff, BUFSIZ); 
+                        fgets(buff, BUFSIZ, stdin);
+                        if(strncmp(buff,"cbc",3) == 0)
+                            cbc = 1;
+                        else
+                            ofb = 1;
 
-						
-						if(write(sockfd, buff, BUFSIZ) <= 0) // trimite catre KM modul ales
-						{
-							perror ("[server]Eroare la write() MOD OPERARE spre KM. \n");
-							//return errno;
-						}
+                        if(write(sockfd, buff, BUFSIZ) <= 0) // trimite catre KM modul ales
+                        {
+                            perror ("[server]Eroare la write() MOD OPERARE spre KM. \n");
+                            //return errno;
+                        }
 
-						
+                        
 
-						bzero(buff, BUFSIZ); 
-						if(recv(sockfd, buff, sizeof(buff), MSG_WAITALL) < 0)
-							{
-								perror ("[server]Eroare la read() CHEIE CRIPTATA de la KM. \n");
-								//return errno;
-							}
-						printf("2)Cheia criptata primita de la KM : %s\n", buff); 	
-						strcpy(ciphertext,buff);
-						primesteCheia = 1;
-					}
-		}
-		// 1) A transmite modul catre B si trimite cheia de la KM
-		if(primesteCheia == 1 && hiB == 0)	
-		{
-			//printf("Astept... ");
-			printf(buff, "%s\n");
-			bzero(buff, BUFSIZ);	
-			while(1)	
-				{if( (x = recv(sockfd, buff, BUFSIZ, MSG_WAITALL)) < 0)
-							{
-								perror ("[server]Eroare la read() Hi, I am B! de la B. \n");
-								//return errno;
-							}
-				else
-					if(strcmp("Hi, I am B!", buff) == 0)
-						break;}
-			printf(buff, "%s");
-		
-			if(strcmp("Hi, I am B!", buff) == 0)
-					{	
-						hiB = 1;
-						printf("3)Trimite cbc sau ofb catre B: ");
-						bzero(buff, BUFSIZ); 
-						int n=0; 
-						while ((buff[n++] = getchar()) != '\n') ; 
-						if (write(sockfd, buff, BUFSIZ) <= 0) // trimite catre B modul ales
-						{
-							perror ("[server]Eroare la write() MOD OPERARE spre B. \n");
-							//return errno;
-						} 
+                        bzero(buff, BUFSIZ); 
+                        //Primeste cheia criptata
+                        if(recv(sockfd, buff, sizeof(buff), 0) < 0)
+                            {
+                                perror ("[server]Eroare la read() CHEIE CRIPTATA de la KM. \n");
+                                //return errno;
+                            }
+                        printf("\n");
+                        printf("2)Cheia criptata primita de la KM : %s\n", buff); 	
+                        strcpy(ciphertext,buff);
+                        primesteCheia = 1;
+                        close(sockfd);
+                        return;
+                    }
+        }
+        // 1) A transmite modul catre B si trimite cheia de la KM
+        if(primesteCheia == 1 && hiB == 0)	
+        {
+            printf(buff, "%s\n");
+            bzero(buff, BUFSIZ);
+            if(read(sockfd, buff, BUFSIZ) < 0)
+                {
+                    perror ("[server]Eroare la read() Hi, I am B! de la B. \n");
+                    //return errno;
+                }
+            printf(buff, "%s");
+            if(strcmp("Hi, I am B!", buff) == 0)
+                    {	
+                        hiB = 1;
+                        printf("3)Trimite cbc sau ofb catre B: ");
+                        bzero(buff, BUFSIZ); 
+                        int n=0; 
+                        while ((buff[n++] = getchar()) != '\n') ; 
+                        // trimite catre B modul ales
+                        if (write(sockfd, buff, BUFSIZ) <= 0) 
+                        {
+                            perror ("[server]Eroare la write() MOD OPERARE spre B. \n");
+                            //return errno;
+                        } 
 
-						bzero(buff, BUFSIZ);
-						strcpy(buff,ciphertext);
-						if (write(sockfd, buff, BUFSIZ) <= 0) // trimite catre B ciphertextul
-						{
-							perror ("[server]Eroare la write() CIPHERTEXT spre B. \n");
-							//return errno;
-						} 	 
-					}
+                        bzero(buff, BUFSIZ);
+                        strcpy(buff,ciphertext);
+                        // trimite catre B ciphertextul
+                        if (write(sockfd, buff, BUFSIZ) <= 0) 
+                        {
+                            perror ("[server]Eroare la write() CIPHERTEXT spre B. \n");
+                            //return errno;
+                        } 	 
+                    }
 
-		}
-		if(hiB == 1) // L-am salutat pe B si acum decriptam
-		{
-			EVP_CIPHER_CTX *ctx;
-			int len;
-			int plaintext_len;
-			int ciphertext_len;
+        }
+        // I-am trimis lui B ciphertextul si acum decriptam
+        if(hiB == 1) 
+        {
+            EVP_CIPHER_CTX *ctx;
+            int len;
+            int plaintext_len;
+            int ciphertext_len;
 
-			unsigned char plaintext[16] ={0}; // Cheie ce urmeaza a fi decriptata
+            unsigned char plaintext[16] ={0}; // Cheie ce urmeaza a fi decriptata
 
-			if(!(ctx = EVP_CIPHER_CTX_new()))
-				handleErrors();
+            if(!(ctx = EVP_CIPHER_CTX_new()))
+                handleErrors();
 
-			if(cbc)
-				if(1 != EVP_DecryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, key, iv))
-					handleErrors();
-			else
-				if(1 != EVP_DecryptInit_ex(ctx, EVP_aes_256_ofb(), NULL, key, iv))
-					handleErrors();
-		
-			if(1 != EVP_DecryptUpdate(ctx, plaintext, &len, ciphertext, ciphertext_len))
-				handleErrors();
-			plaintext_len = len;
+            if(cbc)
+                if(1 != EVP_DecryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, key, iv))
+                    handleErrors();
+            else
+                if(1 != EVP_DecryptInit_ex(ctx, EVP_aes_256_ofb(), NULL, key, iv))
+                    handleErrors();
+        
+            if(1 != EVP_DecryptUpdate(ctx, plaintext, &len, ciphertext, ciphertext_len))
+                handleErrors();
+            plaintext_len = len;
 
-		
-			if(1 != EVP_DecryptFinal_ex(ctx, plaintext + len, &len))
-				handleErrors();
-			plaintext_len += len;
+        
+            if(1 != EVP_DecryptFinal_ex(ctx, plaintext + len, &len))
+                handleErrors();
+            plaintext_len += len;
 
-			/* Clean up */
-			EVP_CIPHER_CTX_free(ctx);
+            EVP_CIPHER_CTX_free(ctx);
 
-			printf("Cheia decriptata este: %s\n", plaintext);
+            printf("Cheia decriptata este: %s\n", plaintext);
 
-		}
+        }
+        if(fisierCriptat == 0) // trimitem date din fisierul criptat
+        {
+                
+                char str[50];
+                unsigned char enc_out[sizeof(str)];
+                unsigned char dec_out[sizeof(str)];
+                
+                /*
+                AES_KEY enc_key, dec_key;
+                FILE * pFile;
+                pFile = fopen ("Text.txt" , "r");
+                if (pFile == NULL) perror ("Error opening file");
+                else {
+                        while (fgets (str , 16 , pFile) != NULL)
+                        {
+                            bzero(iv,sizeof(iv));
+                            
+                            
+                            AES_set_encrypt_key(key, sizeof(key)*8, &enc_key);
 
-		if (strncmp("exit", buff, 4) == 0) { 
-			printf("Server Exit...\n"); 
-		} 
-	}
+                            if(cbc)
+                                AES_cbc_encrypt(str, enc_out, sizeof(str), &enc_key, iv, AES_ENCRYPT);
+                            else
+                                if(ofb)
+                                    AES_ofb_encrypt(str, enc_out, sizeof(str), &enc_key, iv, AES_ENCRYPT);
+                                bzero(buff,sizeof(buff));
+                                strcpy(buff,enc_out);
+                            if (write(sockfd, buff, BUFSIZ) <= 0) // trimite catre KM modul ales
+                            {
+                                perror ("[server]Eroare la write() Hi, I am B! spre A. \n");
+                                //return errno;
+                            }     
+                        }
+                        fisierCriptat = 1;
+                    }
+                    */
+        }		
+
+        if (strncmp("exit", buff, 4) == 0) { 
+            printf("Server Exit...\n"); 
+        } 
+    }
 } 
 
-// Driver function 
+
 int main() 
 { 
-	
-	int sockfd, connfd, len; 
-	struct sockaddr_in servaddr, cli; 
-	unsigned char key3[16] = {0}; // Criptarea cheilor K1 si K2
-    unsigned char iv[16] = {0}; // vector de intializare
+    
+    int sockfd, connfd, len; 
+    struct sockaddr_in servaddr, cli; 
 
-	// socket create and verification 
-	sockfd = socket(AF_INET, SOCK_STREAM, 0); 
-	if (sockfd == -1) { 
-		printf("socket creation failed...\n"); 
-		exit(0); 
-	} 
-	else
-		printf("Socket successfully created..\n"); 
-	bzero(&servaddr, sizeof(servaddr)); 
+    // socket create and verification 
+    sockfd = socket(AF_INET, SOCK_STREAM, 0); 
+    if (sockfd == -1) { 
+        printf("socket creation failed...\n"); 
+        exit(0); 
+    } 
+    else
+        printf("Socket successfully created..\n"); 
+    bzero(&servaddr, sizeof(servaddr)); 
 
-	// assign IP, PORT 
-	servaddr.sin_family = AF_INET; 
-	servaddr.sin_addr.s_addr = htonl(INADDR_ANY); 
-	servaddr.sin_port = htons(PORT); 
+    // assign IP, PORT 
+    servaddr.sin_family = AF_INET; 
+    servaddr.sin_addr.s_addr = htonl(INADDR_ANY); 
+    servaddr.sin_port = htons(PORT); 
 
-	// Binding newly created socket to given IP and verification 
-	if ((bind(sockfd, (SA*)&servaddr, sizeof(servaddr))) != 0) { 
-		printf("socket bind failed...\n"); 
-		exit(0); 
-	} 
-	else
-		printf("Socket successfully binded..\n"); 
+    // Binding newly created socket to given IP and verification 
+    if ((bind(sockfd, (SA*)&servaddr, sizeof(servaddr))) != 0) { 
+        printf("socket bind failed...\n"); 
+        exit(0); 
+    } 
+    else
+        printf("Socket successfully binded..\n"); 
 
-	// Now server is ready to listen and verification 
-	if ((listen(sockfd, 5)) != 0) { 
-		printf("Listen failed...\n"); 
-		exit(0); 
-	} 
-	else
-		printf("Server listening..\n"); 
-	
-	
-	while (1)
+    // Now server is ready to listen and verification 
+    if ((listen(sockfd, 5)) != 0) { 
+        printf("Listen failed...\n"); 
+        exit(0); 
+    } 
+    else
+        printf("Server listening..\n"); 
+    
+    
+    while (1)
     {
-      int client;
-      pid_t new_PID;
-	  len = sizeof(cli); 
+        int client;
+        pid_t new_PID;
+        len = sizeof(cli); 
 
-      printf ("[server]Asteptam la portul %d...\n",PORT);
-      fflush (stdout);
+        pthread_t thread_id;
+        printf ("[server]Asteptam la portul %d...\n",PORT);
+        fflush (stdout);
 
-      /* acceptam un client (stare blocanta pina la realizarea conexiunii) */
-      client = accept (sockfd, (struct sockaddr *) &cli, &len);
+        /* acceptam un client (stare blocanta pina la realizarea conexiunii) */
+        client = accept (sockfd, (struct sockaddr *) &cli, &len);
 
-      /* eroare la acceptarea conexiunii de la un client */
-      if (client < 0)
-      {
-        perror ("[server]Eroare la accept().\n");
-        continue;
-      }
-
-      new_PID = fork();
-
-       if (new_PID == 0)
-        func(client);        
+        /* eroare la acceptarea conexiunii de la un client */
+        if (client < 0)
+        {
+            perror ("[server]Eroare la accept().\n");
+            continue;
+        }
+        
+        int new_client = client;
+        pthread_create(&thread_id, NULL, func, (void *)new_client);      
     }  /* while */
-
 } 

@@ -7,12 +7,13 @@
 #include <errno.h>
 #include <arpa/inet.h> // C - Implicit Declaration of Function 'inet_addr'
 #include <openssl/evp.h>
+#include <openssl/aes.h>
+
 #define MAX 80 
 #define PORT 8080 
 #define SA struct sockaddr 
-#define BUFSIZ 128
 
-//gcc -g B.c -l crypto -o client
+//  gcc -g B.c -l crypto -o client
 
 void handleErrors(void)
 {
@@ -25,28 +26,22 @@ void func(int sockfd)
     int hi=0;
     int cbc=0, ofb=0;
     char buff[BUFSIZ]; 
-    int n; 
     int primesteCheia = 0;
     int msj_decriptat = 0;
     //----------------------------------------------------------------------
-    /* A 256 bit key */
-    unsigned char *key = (unsigned char *)"01234567890123456789012345678901";
-    /* A 128 bit IV */
-    unsigned char *iv = (unsigned char *)"0123456789012345";
+    unsigned char *key = (unsigned char *)"0123456789012345"; // k'
+    unsigned char *iv = (unsigned char *)"0123456789012345";   // Vector de initializare 
     unsigned char ciphertext[128];
-    /* Buffer for the decrypted text */
     unsigned char decryptedtext[128];
 	//----------------------------------------------------------------------
-    int x=0;
     for (;;) { 
         bzero(buff, sizeof(buff));
         if(hi==0) // Hi, I am B!
             { 
-                
                 bzero(buff, sizeof(buff)); 
                 strcpy(buff,"Hi, I am B!"); //trimit Salut sunt B!
                 printf("Trimit spre A... \n");
-                if ( (x = send(sockfd, buff, BUFSIZ, 0)) <= 0) // trimite catre KM modul ales
+                if (write(sockfd, buff, BUFSIZ) <= 0) // trimite catre KM modul ales
 						{
 							perror ("[server]Eroare la write() Hi, I am B! spre A. \n");
 							//return errno;
@@ -56,7 +51,7 @@ void func(int sockfd)
             }
         if ( ((cbc || ofb) == 0) && hi == 1) //primeste modul si ciphertextul
             {   
-                printf("B");
+
                 //1) Citesc modul de operare de la A
                 bzero(buff, sizeof(buff)); 
                 read(sockfd, buff, sizeof(buff)); 
@@ -108,7 +103,6 @@ void func(int sockfd)
 				handleErrors();
 			plaintext_len += len;
 
-			/* Clean up */
 			EVP_CIPHER_CTX_free(ctx);
 
             printf("Cheia decriptata este: %s\n", plaintext);
@@ -118,13 +112,7 @@ void func(int sockfd)
         
         if(msj_decriptat)
         {
-            const char *msj_comunicare = "Buna seara!";
-            strcpy(buff, msj_comunicare);
-            if (write(sockfd, buff, BUFSIZ) <= 0) // trimite catre KM modul ales
-                    {
-                        perror ("[server]Eroare la write() Hi, I am B! spre A. \n");
-                        //return errno;
-                    }
+               
         }
         else
         {

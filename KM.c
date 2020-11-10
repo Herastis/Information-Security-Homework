@@ -12,9 +12,8 @@
 #define MAX 800000 
 #define PORT 8080 
 #define SA struct sockaddr 
-#define BUFSIZ 128
 
-//gcc -g KM.c -l crypto -o client2
+//Copilam fisierul cu: gcc -g KM.c -l crypto -o client2
 
 
 void handleErrors(void)
@@ -29,14 +28,10 @@ void func(int sockfd)
     int n; 
     int trimiteCheia = 0;
     unsigned char mod;
-    unsigned char k[16]; // Cheie generata random
+    unsigned char k[128]; // Cheie generata random k
     int trimite = 0;
-
-
-	/* A 256 bit key */
-    unsigned char *key = (unsigned char *)"01234567890123456789012345678901";
-    /* A 128 bit IV */
-    unsigned char *iv = (unsigned char *)"0123456789012345";
+    unsigned char *key = (unsigned char *)"0123456789012345"; // k'
+    unsigned char *iv = (unsigned char *)"0123456789012345";   // Vector de initializare 
     unsigned char ciphertext[128];
     
     int hi = 0;
@@ -67,27 +62,28 @@ void func(int sockfd)
 
                     if(!(ctx = EVP_CIPHER_CTX_new()))
                         handleErrors();
-                    //alegem ori cbc, ori ofb
+                    //-----------Alegem ori cbc, ori ofb
                     if(strncmp(buff,"cbc",3) == 0)
-                        if(1 != EVP_EncryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, key, iv))
+                       { 
+                           if(1 != EVP_EncryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, key, iv))
                             handleErrors();
+                        }
                     else if(strncmp(buff,"ofb",3) == 0)
                         if(1 != EVP_EncryptInit_ex(ctx, EVP_aes_256_ofb(), NULL, key, iv))
                             handleErrors();
-
+                    //--------------------------------------------------------------------
                     if(1 != EVP_EncryptUpdate(ctx, ciphertext, &len, k, sizeof(k)))
                         handleErrors();
                     ciphertext_len = len;
                     if(1 != EVP_EncryptFinal_ex(ctx, ciphertext + len, &len))
                         handleErrors();
                     ciphertext_len += len;
-                    /* Clean up */
                     EVP_CIPHER_CTX_free(ctx);
                     //------------------------
 
                     bzero(buff, sizeof(buff)); 
                     printf("Cheia criptata este: %s\n", ciphertext);
-                    strcpy(buff,ciphertext);
+                    strncpy(buff,ciphertext, sizeof(ciphertext) / sizeof(ciphertext[0]));
                     printf("Buffer: %s\n", buff);
                     
                     //trimit cheia criptata
